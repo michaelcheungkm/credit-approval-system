@@ -1,0 +1,291 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Credit Approval UI</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell,
+          "Noto Sans", sans-serif;
+        max-width: 1100px;
+        margin: 24px auto;
+        padding: 0 16px;
+      }
+      textarea {
+        width: 100%;
+        min-height: 260px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      pre {
+        background: #0b1020;
+        color: #e7e9ee;
+        padding: 12px;
+        border-radius: 8px;
+        overflow: auto;
+        min-height: 260px;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+      }
+      button {
+        padding: 10px 14px;
+        margin-right: 8px;
+        border-radius: 8px;
+        border: 1px solid #d2d6e0;
+        background: #f7f8fb;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #eef1f7;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      input[type="text"] {
+        width: 360px;
+        padding: 8px;
+      }
+      .muted {
+        color: #666;
+        font-size: 13px;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      .bar {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .bar > * {
+        margin: 4px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>Credit Approval (JSON)</h2>
+    <p class="muted">
+      This is a Cloudflare Pages UI. It proxies <code>/api/*</code> to your Worker
+      (set by Pages env var <code>WORKER_BASE_URL</code>).
+    </p>
+
+    <div class="row">
+      <div>
+        <h3>Input</h3>
+        <div class="bar">
+          <input id="file" type="file" accept=".json,application/json" />
+          <button id="loadFirst">Load first test case</button>
+          <label class="muted">Pick:</label>
+          <select id="caseSelect"></select>
+          <button id="loadSelected">Load selected</button>
+          <button id="prev">Prev</button>
+          <button id="next">Next</button>
+          <button id="format">Format JSON</button>
+        </div>
+        <p class="muted">
+          Paste a single case JSON object (must include <code>case_id</code>).
+          You can also upload a file or click “Load first test case” if your file
+          contains an array of cases.
+        </p>
+        <textarea id="json" placeholder='{"case_id":"TEST-1","applicant_data":{...}}'></textarea>
+
+        <div class="bar">
+          <button id="submit">Submit</button>
+          <button id="load">Load result by case_id</button>
+          <input id="caseId" type="text" placeholder="case_id (e.g., TEST-1)" />
+        </div>
+
+        <p class="muted" id="status"></p>
+      </div>
+
+      <div>
+        <h3>Result</h3>
+        <pre id="result">{}</pre>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const setStatus = (msg) => ($("status").textContent = msg);
+
+      let loadedCases = [];
+
+      function extractCases(v) {
+        // Supported shapes:
+        // - [ {case_id: ...}, ... ]
+        // - { test_cases: [ {case_id: ...}, ... ] }
+        // - { "<id>": {case_id: ...}, ... }
+        if (Array.isArray(v)) return v;
+        if (v && typeof v === "object" && Array.isArray(v.test_cases)) return v.test_cases;
+        if (v && typeof v === "object") {
+          const values = Object.values(v);
+          const candidates = values.filter((x) => x && typeof x === "object" && "case_id" in x);
+          if (candidates.length > 0) return candidates;
+        }
+        return [];
+      }
+
+      function populateSelect() {
+        const sel = $("caseSelect");
+        sel.innerHTML = "";
+        loadedCases.forEach((c, idx) => {
+          const opt = document.createElement("option");
+          opt.value = String(idx);
+          opt.textContent = c?.case_id ? `${idx + 1}. ${c.case_id}` : `${idx + 1}. (missing case_id)`;
+          sel.appendChild(opt);
+        });
+      }
+
+      function loadCaseAt(index) {
+        if (!loadedCases.length) {
+          setStatus("No cases loaded yet. Upload mortgage_test_cases.json first.");
+          return;
+        }
+        const idx = Math.max(0, Math.min(loadedCases.length - 1, index));
+        const c = loadedCases[idx];
+        $("json").value = pretty(c);
+        $("caseId").value = c?.case_id || "";
+        $("caseSelect").value = String(idx);
+        setStatus(`Loaded case ${idx + 1} of ${loadedCases.length}${c?.case_id ? ` (${c.case_id})` : ""}.`);
+      }
+
+      function pretty(obj) {
+        return JSON.stringify(obj, null, 2);
+      }
+
+      function safeJsonParse(text) {
+        try {
+          return { ok: true, value: JSON.parse(text) };
+        } catch (e) {
+          return { ok: false, error: String(e) };
+        }
+      }
+
+      $("file").addEventListener("change", async (e) => {
+        const f = e.target.files?.[0];
+        if (!f) return;
+        const text = await f.text();
+        $("json").value = text;
+
+        const parsed = safeJsonParse(text.trim());
+        if (!parsed.ok) {
+          loadedCases = [];
+          populateSelect();
+          setStatus(`Loaded file: ${f.name} (but JSON is invalid: ${parsed.error})`);
+          return;
+        }
+
+        loadedCases = extractCases(parsed.value);
+        populateSelect();
+        setStatus(`Loaded file: ${f.name} (${loadedCases.length} case(s) detected).`);
+      });
+
+      $("format").addEventListener("click", () => {
+        const parsed = safeJsonParse($("json").value.trim());
+        if (!parsed.ok) {
+          setStatus(`Invalid JSON: ${parsed.error}`);
+          return;
+        }
+        $("json").value = pretty(parsed.value);
+        setStatus("Formatted JSON.");
+      });
+
+      $("loadFirst").addEventListener("click", () => loadCaseAt(0));
+
+      $("loadSelected").addEventListener("click", () => {
+        const idx = Number($("caseSelect").value);
+        if (!Number.isFinite(idx)) return;
+        loadCaseAt(idx);
+      });
+
+      $("prev").addEventListener("click", () => {
+        const idx = Number($("caseSelect").value || "0");
+        loadCaseAt(idx - 1);
+      });
+
+      $("next").addEventListener("click", () => {
+        const idx = Number($("caseSelect").value || "0");
+        loadCaseAt(idx + 1);
+      });
+
+      $("submit").addEventListener("click", async () => {
+        $("submit").disabled = true;
+        try {
+          setStatus("Submitting...");
+
+          const raw = $("json").value.trim();
+          const parsed = safeJsonParse(raw);
+          if (!parsed.ok) throw new Error(`Invalid JSON: ${parsed.error}`);
+
+          const body = parsed.value;
+          if (!body || typeof body !== "object") throw new Error("JSON must be an object.");
+          if (!body.case_id) throw new Error("JSON must include case_id.");
+
+          $("caseId").value = body.case_id;
+
+          const res = await fetch(`/api/submit`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+
+          const text = await res.text();
+          let out;
+          try {
+            out = JSON.parse(text);
+          } catch {
+            out = { raw: text };
+          }
+
+          $("result").textContent = pretty(out);
+          setStatus(res.ok ? "Submitted OK" : `Submit failed (${res.status})`);
+        } catch (err) {
+          $("result").textContent = String(err);
+          setStatus("Error");
+        } finally {
+          $("submit").disabled = false;
+        }
+      });
+
+      $("load").addEventListener("click", async () => {
+        $("load").disabled = true;
+        try {
+          setStatus("Loading...");
+          const caseId = $("caseId").value.trim();
+          if (!caseId) throw new Error("Enter case_id.");
+
+          const res = await fetch(`/api/loan/${encodeURIComponent(caseId)}`);
+          const text = await res.text();
+          let out;
+          try {
+            out = JSON.parse(text);
+          } catch {
+            out = { raw: text };
+          }
+
+          $("result").textContent = pretty(out);
+          if (out === null) {
+            setStatus("No saved result for this case_id yet. Submit it first.");
+          } else {
+            setStatus(res.ok ? "Loaded OK" : `Load failed (${res.status})`);
+          }
+        } catch (err) {
+          $("result").textContent = String(err);
+          setStatus("Error");
+        } finally {
+          $("load").disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

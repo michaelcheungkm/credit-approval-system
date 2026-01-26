@@ -1,0 +1,17 @@
+﻿name = "credit-approval-system"
+main = "src/index.ts"
+compatibility_date = "2026-01-26"
+compatibility_flags = ["nodejs_compat"]
+
+[ai]
+binding = "AI"
+
+[[durable_objects.bindings]]
+name = "LOAN_STATE"
+class_name = "LoanState"
+script_name = "credit-approval-system"
+
+[durable_objects]
+migrations = [
+  { tag = "v1", new_classes = ["LoanState"] }
+]
