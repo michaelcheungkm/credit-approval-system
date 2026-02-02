@@ -1,6 +1,9 @@
 # Credit Approval System (Cloudflare Worker + UI)
 
-This project is a Cloudflare Workers-based mortgage/credit underwriting prototype.
+This project is a mortgage/credit underwriting prototype with two runtimes:
+
+- **Cloudflare Worker** (TypeScript) – deterministic rules baseline + Durable Object storage + built-in UI
+- **Azure OpenAI + LangGraph** (Python) – 5-agent underwriting workflow + local server UI
 
 It accepts a JSON “case”, computes a **policy-inspired underwriting decision** (rules-based baseline), stores the result in a **Durable Object**, and provides a simple **web UI** for uploading/selecting test cases and viewing results.
 
@@ -16,6 +19,12 @@ It accepts a JSON “case”, computes a **policy-inspired underwriting decision
   - Stores the latest computed decision/result for each `case_id`
 - **Pages UI (optional)** (`pages-ui/`)
   - Static UI + Pages Functions proxy to forward `/api/*` calls to the Worker (useful for deployment)
+
+- **Azure / LangGraph multi-agent server (optional)** (`azure-underwriting-system/`)
+  - `GET /setup` – enter Azure endpoint/key + test connection
+  - `GET /ui` – submit cases
+  - `GET /result/<case_id>` – separate result window
+  - `POST /api/submit` – run the 5-agent workflow and save result locally
 
 ## Local development
 
@@ -102,4 +111,8 @@ Then set Pages environment variable:
   - Workers AI (Llama 3.3) or Azure OpenAI
   - Policy retrieval (RAG) from `underwriting_policies.pdf`
   - Multi-agent workflow (Credit/Income/Asset/Collateral/Critic/Decision) using LangGraph
+
+## Run the Azure multi-agent server (local)
+
+See `azure-underwriting-system/README.md`.
 
